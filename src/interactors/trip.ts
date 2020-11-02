@@ -1,8 +1,8 @@
 import { URL } from "url";
 import { DateTime, Interval } from "luxon";
 import { Logger } from "pino";
-import { getRepository } from "typeorm";
-import { CompletedTrip } from "../models/completed-trip";
+import { CompletedTrip as CompletedTripOrm } from "../models/completed-trip";
+import { CompletedTripDataSource } from "../repositories/trip-repository";
 import { Analytics } from "../services/analytics";
 import { BalanceInteractor } from "./balance";
 import { PolicyInteractor } from "./policy";
@@ -37,6 +37,7 @@ interface DataPoints {
 export class TripInteractor {
   private userId: number;
   private logger: Logger;
+  private tripRepo: CompletedTripDataSource;
   private balanceInteractor: BalanceInteractor;
   private policyInteractor: PolicyInteractor;
   private analytics: Analytics;
@@ -44,11 +45,13 @@ export class TripInteractor {
   constructor(
     analyticsContext: any,
     logger: Logger,
+    tripRepo: CompletedTripDataSource,
     balanceInteractor: BalanceInteractor,
     policyInteractor: PolicyInteractor,
     userId: number
   ) {
     this.logger = logger.child({ service: "trip" });
+    this.tripRepo = tripRepo;
     this.balanceInteractor = balanceInteractor;
     this.policyInteractor = policyInteractor;
     this.userId = userId;
@@ -74,7 +77,16 @@ export class TripInteractor {
     }
 
     const transactionId = await this.balanceInteractor.charge(cost);
-    await this.createCompletedTrip(tripId, trip, transactionId, cost);
+    await this.tripRepo.insert({
+      id: tripId,
+      transactionId,
+      start: tripPeriod.start.toJSDate(),
+      end: tripPeriod.end.toJSDate(),
+      cost,
+      distance: trip.distance,
+      duration: trip.duration,
+      tripDataUrl: trip.tripDataUrl,
+    });
 
     await userNotificationTrip(distance, cost, this.userId);
     this.analytics.track({
@@ -90,42 +102,21 @@ export class TripInteractor {
     orderDir: "ASC" | "DESC",
     search: string
   ) {
-    const query = getRepository(CompletedTrip)
-      .createQueryBuilder("completed_trip")
-      .orderBy(`"${orderBy}"`, orderDir, "NULLS LAST")
-      .limit(take)
-      .offset(skip * take);
-
-    if (search) {
-      query.where('completed_trip."id" ILIKE :search', {
-        search: `%${search}%`,
-      });
-    }
-
-    const [result, total] = await query.getManyAndCount();
-
-    const serialised = result.map(
-      ({ id, start, end, distance, cost, tripDataUrl, transactionId }) => ({
-        id,
-        start,
-        end,
-        distance,
-        cost,
-        transactionId,
-        hasTripData: !!tripDataUrl,
-      })
-    );
+    const results = await this.tripRepo.getAll({
+      take,
+      skip,
+      orderBy,
+      orderDir,
+      search,
+    });
 
     return {
-      items: {
-        results: serialised,
-        total,
-      },
+      items: results,
     };
   }
 
   public async getTrips() {
-    const trips = await CompletedTrip.find({
+    const trips = await CompletedTripOrm.find({
       where: { user: this.userId },
       order: { start: "DESC" },
     });
@@ -144,10 +135,8 @@ export class TripInteractor {
     return result;
   }
 
-  public async getTripData(tripId: number) {
-    const trip = await CompletedTrip.findOne({
-      where: { id: tripId },
-    });
+  public async getTripData(tripId: string) {
+    const trip = await this.tripRepo.getBy({ id: tripId });
 
     if (!trip) {
       return;
@@ -192,7 +181,7 @@ export class TripInteractor {
     cost: number
   ) {
     try {
-      await CompletedTrip.create({
+      await CompletedTripOrm.create({
         ...trip,
         cost,
         transactionId,
