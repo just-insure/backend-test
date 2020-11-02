@@ -37,14 +37,14 @@ export const getAllTripsForUser = async (
 };
 
 export const getTripForUser = async (
-  req: Request<{ userId: number; tripId: number }>,
+  req: Request<{ userId: number; tripId: string }>,
   res: Response
 ) => {
-  const { userId } = req.params;
+  const { userId, tripId } = req.params;
   const { correlationId } = req.context;
 
   const { tripInteractor } = createInteractors(userId, correlationId);
-  const trip = await tripInteractor.getTripData(userId);
+  const trip = await tripInteractor.getTripData(tripId);
 
   res.send(trip);
 };

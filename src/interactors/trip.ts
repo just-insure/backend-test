@@ -144,7 +144,7 @@ export class TripInteractor {
     return result;
   }
 
-  public async getTripData(tripId: number) {
+  public async getTripData(tripId: string) {
     const trip = await CompletedTrip.findOne({
       where: { id: tripId },
     });
