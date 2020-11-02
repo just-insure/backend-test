@@ -90,17 +90,9 @@ export class TripInteractor {
     orderDir: "ASC" | "DESC",
     search: string
   ) {
-    const order =
-      orderBy === "id"
-        ? "completed_trip_id"
-        : orderBy === "cost"
-        ? "transaction_amount"
-        : orderBy;
-
     const query = getRepository(CompletedTrip)
       .createQueryBuilder("completed_trip")
-      .leftJoinAndSelect("completed_trip.transaction", "transaction")
-      .orderBy(`"${order}"`, orderDir, "NULLS LAST")
+      .orderBy(`"${orderBy}"`, orderDir, "NULLS LAST")
       .limit(take)
       .offset(skip * take);
 
@@ -134,13 +126,8 @@ export class TripInteractor {
 
   public async getTrips() {
     const trips = await CompletedTrip.find({
-      where: {
-        user: this.userId,
-      },
-      order: {
-        start: "DESC",
-      },
-      relations: ["transaction"],
+      where: { user: this.userId },
+      order: { start: "DESC" },
     });
 
     const result = trips.map(
